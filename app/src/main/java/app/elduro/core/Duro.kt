@@ -154,6 +154,24 @@ object Libros {
         if (rap >= 0) Prefs.setCarteraRapida(c, n, rap)
     }
 
+    /** Sólo se puede borrar un libro sin movimientos ni deudas (lo demás se borra con él). */
+    fun puedeBorrar(db: ElDuroDb, nombre: String): Boolean {
+        val ids = db.carteras().all().filter { it.libro == nombre }.map { it.id }.toSet()
+        return db.movimientos().all().none { it.carteraId in ids || it.carteraDestinoId in ids } && db.deudas().all().none { it.libro == nombre }
+    }
+
+    fun borrar(c: Context, db: ElDuroDb, nombre: String) {
+        db.runInTransaction {
+            db.carteras().all().filter { it.libro == nombre }.forEach { db.carteras().delete(it.id) }
+            db.recurrentes().all().filter { it.libro == nombre }.forEach { db.recurrentes().delete(it.id) }
+            db.presupuestos().all().filter { it.libro == nombre }.forEach { db.presupuestos().delete(it.libro, it.categoria) }
+            db.faltantes().all().filter { it.libro == nombre }.forEach { db.faltantes().delete(it.id) }
+        }
+        setOrden(c, orden(c) - nombre)
+        archivar(c, nombre, false)
+        CarpetaSync.quitarCarpetaLibro(c, nombre)
+    }
+
     fun archivar(c: Context, nombre: String, archivar: Boolean) {
         val a = archivados(c)
         Prefs.sp(c).edit().putStringSet(ARCHIVADOS, if (archivar) a + nombre else a - nombre).apply()

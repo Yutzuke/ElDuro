@@ -68,7 +68,7 @@ object Exportar {
 <xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
 <xf numFmtId="4" fontId="1" fillId="2" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
-</cellXfs></styleSheet>"""
+</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>"""
         val n = hojas.size
         ZipOutputStream(FileOutputStream(out)).use { z ->
             fun put(nombre: String, txt: String) { z.putNextEntry(ZipEntry(nombre)); z.write(txt.toByteArray()); z.closeEntry() }
@@ -137,7 +137,8 @@ object Exportar {
         res.filas += listOf(C("", NEGRITA), C("$ BCV", NEGRITA), C("$ Binance", NEGRITA))
         val rb = Finanzas.resumen(delLibro, porId, libro, mes, tasas, Vista.USD_BCV, deudas)
         val rn = Finanzas.resumen(delLibro, porId, libro, mes, tasas, Vista.USD_BINANCE, deudas)
-        fun fila(t: String, a: Double?, b: Double?) { res.filas += listOf(C(t), a?.let { C(it, NUM) }, b?.let { C(it, NUM) }) }
+        fun r2(x: Double) = Math.round(x * 100) / 100.0
+        fun fila(t: String, a: Double?, b: Double?) { res.filas += listOf(C(t), a?.let { C(r2(it), NUM) }, b?.let { C(r2(it), NUM) }) }
         fila("Entradas", rb.entradas, rn.entradas)
         fila("Gastos", -rb.gastos, -rn.gastos)
         fila("Resultado del mes", rb.resultado, rn.resultado)
@@ -149,7 +150,7 @@ object Exportar {
         val saldos = Finanzas.saldos(delLibro, mes.atEndOfMonth().toString())
         carteras.filter { it.libro == libro && !it.archivada }.forEach { c -> res.filas += listOf(C(c.nombre), C((saldos[c.id] ?: 0) / 100.0, NUM), C(c.moneda.simbolo)) }
         res.filas.add(emptyList()); res.filas += listOf(C("Gastos por categoría", NEGRITA), C("$ BCV", NEGRITA))
-        rb.porCategoria.forEach { (cat, v) -> res.filas += listOf(C(cat), C(v, NUM)) }
+        rb.porCategoria.forEach { (cat, v) -> res.filas += listOf(C(cat), C(r2(v), NUM)) }
 
         // Deudas
         val deu = Hoja("Deudas", listOf(12.0, 40.0, 12.0, 16.0, 16.0, 16.0, 14.0))

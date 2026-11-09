@@ -99,7 +99,8 @@ class EstadoApp(val ctx: Context) {
     fun borrar(scope: CoroutineScope, m: Movimiento) = io(scope) {
         Duro.borrar(db, m)
         withContext(Dispatchers.Main) {
-            val r = avisos.showSnackbar("Movimiento borrado", actionLabel = "Deshacer", withDismissAction = true)
+            val r = avisos.showSnackbar("Movimiento borrado", actionLabel = "Deshacer", withDismissAction = true,
+                duration = androidx.compose.material3.SnackbarDuration.Long)
             if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) io(scope) { Duro.guardar(db, m.copy(id = 0)) }
         }
     }

@@ -100,6 +100,22 @@ object CarpetaSync {
         }.get()
     }
 
+    /** Borra la carpeta de un libro eliminado si sólo contiene CSV sin movimientos. */
+    fun quitarCarpetaLibro(ctx: Context, libro: String) {
+        val app = ctx.applicationContext
+        exec.submit {
+            if (!Prefs.tieneAcceso()) return@submit
+            val base = Prefs.carpeta(app); val d = File(base, libro)
+            if (!d.isDirectory) return@submit
+            val vacios = d.listFiles().orEmpty().filter { reMes.matches(it.name) && leerCsv(it).isEmpty() }
+            if (d.listFiles().orEmpty().size == vacios.size) {
+                val e = hashes(app).edit()
+                vacios.forEach { e.remove(clave(base, it)); it.delete() }
+                e.commit(); d.delete()
+            }
+        }.get()
+    }
+
     /** Importa cambios externos y luego escribe todo. Seguro de llamar al abrir la app. */
     fun sincronizar(ctx: Context): Informe {
         val app = ctx.applicationContext

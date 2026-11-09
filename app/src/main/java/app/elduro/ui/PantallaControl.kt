@@ -247,8 +247,10 @@ fun DialogoAbono(e: EstadoApp, s: EstadoDeuda, carteras: List<Cartera>, tabla: T
     val d = s.deuda
     var cartera by remember { mutableStateOf(carteras.firstOrNull { it.moneda == d.moneda && it.forma == app.elduro.data.Forma.DIGITAL } ?: carteras.firstOrNull { it.moneda == d.moneda } ?: carteras.firstOrNull()) }
     val sugerido = minOf(s.cuota ?: s.saldo, s.saldo)
-    var monto by remember { mutableStateOf("") }
     var tasa by remember { mutableStateOf(tabla.en(Fuente.BINANCE, hoy())?.valor?.let { Dinero.tasa(it) } ?: "") }
+    var monto by remember(cartera) {
+        mutableStateOf(cartera?.let { Control.aplicado(sugerido, d.moneda, it.moneda, Dinero.parseDouble(tasa)) }?.let { Dinero.csv(it) } ?: "")
+    }
     var fecha by remember { mutableStateOf(Fechas.dmy(hoy())) }
     val c = cartera
     val distinta = c != null && (c.moneda == Moneda.BS) != (d.moneda == Moneda.BS)
@@ -263,7 +265,7 @@ fun DialogoAbono(e: EstadoApp, s: EstadoDeuda, carteras: List<Cartera>, tabla: T
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Saldo: ${Dinero.fmt(s.saldo, d.moneda)}" + (s.cuota?.let { " · cuota ${Dinero.fmt(it, d.moneda)}" } ?: ""))
                 SelectorCartera(if (d.sentido == Sentido.DEBO) "Pagar desde" else "Entra en", c, carteras) { cartera = it }
-                OutlinedTextField(monto, { monto = it }, label = { Text("Monto (${c?.moneda?.simbolo ?: ""})") }, placeholder = { porDefecto?.let { Text(Dinero.csv(it)) } },
+                OutlinedTextField(monto, { monto = it }, label = { Text("Monto (${c?.moneda?.simbolo ?: ""})") },
                     singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                 if (distinta) OutlinedTextField(tasa, { tasa = it }, label = { Text("Tasa (Bs por $)") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))

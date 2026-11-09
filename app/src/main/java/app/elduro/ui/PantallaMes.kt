@@ -174,7 +174,7 @@ private fun TarjetaResumen(r: Finanzas.Resumen, ant: Finanzas.Resumen, v: Vista)
             if (kotlin.math.abs(r.cambiaria) > 0.004) Linea("Ganancia/pérdida en cambios", Dinero.fmtVista(r.cambiaria, v, true))
             r.devaluacion?.takeIf { kotlin.math.abs(it) > 0.004 }?.let { Linea("Devaluación de tus Bs (aprox.)", Dinero.fmtVista(it, v, true)) }
             if (r.credito > 0.004) Text("Incluye ${Dinero.fmtVista(r.credito, v)} en compras a crédito", style = MaterialTheme.typography.bodySmall, color = Colores.neutro())
-            if (ant.gastos > 0.004 || ant.entradas > 0.004) {
+            if ((ant.gastos > 0.004 || ant.entradas > 0.004) && (r.gastos > 0.004 || r.entradas > 0.004)) {
                 fun pct(a: Double, b: Double) = if (b > 0.004) "${if (a >= b) "+" else ""}${((a - b) / b * 100).toInt()}%" else "—"
                 Text("vs mes anterior: entradas ${pct(r.entradas, ant.entradas)} · gastos ${pct(r.gastos, ant.gastos)}",
                     style = MaterialTheme.typography.bodySmall, color = Colores.neutro())

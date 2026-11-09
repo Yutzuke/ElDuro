@@ -33,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.elduro.BuildConfig
@@ -218,6 +219,16 @@ private fun SeccionLibros(e: EstadoApp, carteras: List<Cartera>) {
                 TextButton(enabled = arch || todos.count { it !in archivados } > 1, onClick = { Libros.archivar(e.ctx, l, !arch); e.versionLibros++ }) {
                     Text(if (arch) "Mostrar" else "Archivar")
                 }
+                if (todos.size > 1) TextButton(onClick = {
+                    e.io(scope) {
+                        val ok = Libros.puedeBorrar(e.db, l)
+                        if (ok) Libros.borrar(e.ctx, e.db, l)
+                        withContext(Dispatchers.Main) {
+                            e.versionLibros++
+                            e.avisos.showSnackbar(if (ok) "Libro «$l» borrado" else "«$l» tiene movimientos o deudas: archívalo en vez de borrarlo")
+                        }
+                    }
+                }) { Text("✕", color = Colores.gasto()) }
             }
         }
         OutlinedButton(onClick = { dialogo = "" }) { Text("Nuevo libro") }
@@ -230,8 +241,11 @@ private fun SeccionLibros(e: EstadoApp, carteras: List<Cartera>) {
             title = { Text(if (viejo.isEmpty()) "Nuevo libro" else "Renombrar «$viejo»") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val foco = remember { androidx.compose.ui.focus.FocusRequester() }
                     androidx.compose.material3.OutlinedTextField(nombre, { nombre = it; error = null }, label = { Text("Nombre") }, singleLine = true,
-                        isError = error != null, supportingText = { error?.let { Text(it) } })
+                        isError = error != null, supportingText = { error?.let { Text(it) } },
+                        modifier = Modifier.focusRequester(foco))
+                    androidx.compose.runtime.LaunchedEffect(Unit) { runCatching { foco.requestFocus() } }
                     Text(if (viejo.isEmpty()) "Se crea con Bs efectivo, Bs digital, $ efectivo y $ digital."
                          else "Se renombra en todos sus datos y su carpeta de CSV en NodeSync.", style = MaterialTheme.typography.bodySmall, color = Colores.neutro())
                 }
