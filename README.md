@@ -35,6 +35,8 @@ Requiere JDK 17 y Android SDK 34.
 
 Tras instalar, concede «Acceso a todos los archivos» para escribir en la microSD.
 
+Guía completa de uso y construcción: [GUIA.md](GUIA.md)
+
 ## Licencia
 
 GPL-3.0
