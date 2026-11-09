@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.elduro.BuildConfig
 import app.elduro.core.CarpetaSync
+import app.elduro.core.Categorias
 import app.elduro.core.ConsultaTasas
 import app.elduro.core.Dinero
 import app.elduro.core.Duro
@@ -122,7 +123,7 @@ private fun Seccion(titulo: String, contenido: @Composable () -> Unit) {
 @Composable
 private fun DialogoImportar(e: EstadoApp, hojas: List<ImportarExcel.Hoja>, onCerrar: () -> Unit, onHecho: (String) -> Unit) {
     val scope = rememberCoroutineScope()
-    val elegidas = remember { mutableStateListOf<String>().apply { addAll(hojas.filter { it.util && it.notas.isEmpty() }.map { it.nombre }) } }
+    val elegidas = remember { mutableStateListOf<String>().apply { addAll(hojas.filter { it.util && Categorias.normal(it.nombre) != "formato" }.map { it.nombre }) } }
     var libro by remember { mutableStateOf(e.libro) }
     var corregir by remember { mutableStateOf(true) }
     var trabajando by remember { mutableStateOf(false) }
@@ -135,9 +136,11 @@ private fun DialogoImportar(e: EstadoApp, hojas: List<ImportarExcel.Hoja>, onCer
                         Checkbox(h.nombre in elegidas, { if (it) elegidas += h.nombre else elegidas -= h.nombre }, enabled = h.util)
                         Column {
                             Text(h.nombre, fontWeight = FontWeight.SemiBold)
-                            Text(if (h.util) "${h.filas.size} movimientos" else "sin movimientos", style = MaterialTheme.typography.bodySmall)
+                            Text(h.resumen, style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                    if (h.nombre in elegidas) h.deudas.forEach { Text("· ${it.nombre}: ${Dinero.fmt(it.monto, it.moneda)}", style = MaterialTheme.typography.bodySmall) }
+                    if (h.nombre in elegidas) h.faltantes.forEach { Text("· $it", style = MaterialTheme.typography.bodySmall) }
                     h.notas.forEach { Text("· $it", style = MaterialTheme.typography.bodySmall, color = Colores.neutro()) }
                     if (h.nombre in elegidas) h.filas.filter { it.avisoFecha != null }.forEach {
                         Text("⚠ fila ${it.fila}: ${it.descripcion} — ${it.avisoFecha}", style = MaterialTheme.typography.bodySmall, color = Colores.aviso())
@@ -161,11 +164,14 @@ private fun DialogoImportar(e: EstadoApp, hojas: List<ImportarExcel.Hoja>, onCer
                     val sel = hojas.filter { it.nombre in elegidas }
                     val r = ImportarExcel.importar(e.db, sel, libro, corregir)
                     val desde = sel.flatMap { it.filas }.mapNotNull { it.fecha }.minOrNull()
+                        ?: sel.flatMap { it.deudas }.mapNotNull { it.fecha }.minOrNull()
                     val hist = if (desde != null) runCatching { ConsultaTasas.historico(e.db, desde) }.getOrNull() else null
                     val txt = buildString {
-                        append("Importados ${r.nuevos} movimientos nuevos")
-                        if (r.actualizados > 0) append(" y ${r.actualizados} actualizados")
+                        append("Movimientos: ${r.nuevos} nuevos")
+                        if (r.actualizados > 0) append(", ${r.actualizados} ya existían (actualizados)")
                         append(" en $libro.")
+                        if (r.deudas > 0) append("\nDeudas: ${r.deudas} (en Control → Deudas; añade cuotas si las tienen).")
+                        if (r.faltantes > 0) append("\nFaltantes de la tienda: ${r.faltantes}.")
                         if (r.carteras.isNotEmpty()) append("\nCarteras creadas: ${r.carteras.joinToString()}.")
                         append(if (hist != null) "\nTasas históricas BCV cargadas desde ${Fechas.dmy(desde!!)}."
                                else "\nSin internet para el histórico: se usarán tasas estimadas hasta que lo rellenes en Tasas.")

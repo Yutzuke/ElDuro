@@ -2,6 +2,9 @@ package app.elduro.core
 
 import android.util.Xml
 import app.elduro.data.Cartera
+import app.elduro.data.Deuda
+import app.elduro.data.Faltante
+import app.elduro.data.Sentido
 import app.elduro.data.ElDuroDb
 import app.elduro.data.Forma
 import app.elduro.data.Moneda
@@ -12,6 +15,7 @@ import java.io.InputStream
 import java.security.MessageDigest
 import java.time.LocalDate
 import java.util.zip.ZipInputStream
+import kotlin.math.abs
 import kotlin.math.roundToLong
 
 /**
@@ -31,8 +35,19 @@ object ImportarExcel {
         val avisoFecha: String? = null,
     )
 
-    data class Hoja(val nombre: String, val mes: Int?, val filas: List<Fila>, val notas: List<String>) {
-        val util get() = filas.isNotEmpty()
+    data class DeudaXl(val fila: Int, val fecha: String?, val nombre: String, val moneda: Moneda, val monto: Long)
+
+    data class Hoja(
+        val nombre: String, val mes: Int?, val filas: List<Fila>, val notas: List<String>,
+        val deudas: List<DeudaXl> = emptyList(), val faltantes: List<String> = emptyList(),
+    ) {
+        val util get() = filas.isNotEmpty() || deudas.isNotEmpty() || faltantes.isNotEmpty()
+        val resumen get() = when {
+            deudas.isNotEmpty() -> "${deudas.size} deudas"
+            faltantes.isNotEmpty() -> "${faltantes.size} faltantes → libro Tienda"
+            filas.isNotEmpty() -> "${filas.size} movimientos"
+            else -> "sin datos"
+        }
     }
 
     private val meses = listOf("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
@@ -58,8 +73,8 @@ object ImportarExcel {
     private fun analizar(nombre: String, celdas: Map<Pair<Int, String>, String>): Hoja {
         val norm = Categorias.normal(nombre)
         val mes = meses.indexOfFirst { norm.contains(it) }.takeIf { it >= 0 }?.plus(1)
-        if (norm.contains("deuda")) return Hoja(nombre, null, emptyList(), listOf("Deudas: se importarán en la fase 2 (módulo de deudas)."))
-        if (norm.contains("faltante")) return Hoja(nombre, null, emptyList(), listOf("Faltantes: se importarán en la fase 2."))
+        if (norm.contains("deuda")) return analizarDeudas(nombre, celdas)
+        if (norm.contains("faltante")) return analizarFaltantes(nombre, celdas)
 
         val filasN = celdas.keys.map { it.first }.distinct().sorted()
         val out = mutableListOf<Fila>()
@@ -105,6 +120,39 @@ object ImportarExcel {
         return Hoja(nombre, mes, filas, notas).also { if (anio == null && filas.isNotEmpty()) notas += "Sin fechas legibles." }
     }
 
+    private fun limpiar(t: String) = t.replace(Regex("\\s+"), " ").trim().replaceFirstChar { it.uppercase() }
+
+    private fun analizarDeudas(nombre: String, celdas: Map<Pair<Int, String>, String>): Hoja {
+        val out = mutableListOf<DeudaXl>(); val notas = mutableListOf<String>()
+        var moneda: Moneda? = null
+        for (r in celdas.keys.map { it.first }.distinct().sorted()) {
+            val a = celdas[r to "A"]?.trim().orEmpty(); val b = celdas[r to "B"]?.trim().orEmpty(); val c = celdas[r to "C"]?.trim().orEmpty()
+            for (col in listOf("G", "H", "I", "J")) celdas[r to col]?.trim()?.takeIf { it.length > 8 && it.toDoubleOrNull() == null }?.let {
+                notas += "Nota en la hoja (no se importa, no tiene monto): «${limpiar(it)}»"
+            }
+            if (Categorias.normal(a) == "fecha") {
+                val cn = Categorias.normal(c)
+                moneda = when { cn.contains("bolivar") -> Moneda.BS; cn.contains("dolar") -> Moneda.USD; else -> null }; continue
+            }
+            val m = moneda ?: continue
+            if (Categorias.normal(b).startsWith("total")) { moneda = null; continue }
+            val v = c.toDoubleOrNull() ?: continue
+            if (v == 0.0 || b.isBlank()) continue
+            out += DeudaXl(r, convertirFecha(a), limpiar(b), m, abs((v * 100).roundToLong()))
+        }
+        return Hoja(nombre, null, emptyList(), notas, deudas = out)
+    }
+
+    private fun analizarFaltantes(nombre: String, celdas: Map<Pair<Int, String>, String>): Hoja {
+        val out = mutableListOf<String>(); var dentro = false
+        for (r in celdas.keys.map { it.first }.distinct().sorted()) {
+            val a = celdas[r to "A"]?.trim().orEmpty()
+            if (Categorias.normal(a).contains("pendiente")) { dentro = true; continue }
+            if (dentro && a.isNotBlank()) out += limpiar(a)
+        }
+        return Hoja(nombre, null, emptyList(), emptyList(), faltantes = out)
+    }
+
     /** Número de serie de Excel (días desde 1899-12-30) o texto d/m/a, incluso "13/102026". */
     fun convertirFecha(s: String): String? {
         s.toDoubleOrNull()?.let { n -> if (n in 20000.0..80000.0) return LocalDate.of(1899, 12, 30).plusDays(n.toLong()).toString() }
@@ -113,7 +161,9 @@ object ImportarExcel {
         return runCatching { LocalDate.of(m.groupValues[3].toInt(), m.groupValues[2].toInt(), m.groupValues[1].toInt()).toString() }.getOrNull()
     }
 
-    data class Resultado(val nuevos: Int, val actualizados: Int, val carteras: List<String>)
+    data class Resultado(val nuevos: Int, val actualizados: Int, val carteras: List<String>, val deudas: Int = 0, val faltantes: Int = 0)
+
+    private fun hash(t: String) = MessageDigest.getInstance("SHA-1").digest(t.toByteArray()).joinToString("") { "%02x".format(it) }.take(10)
 
     /**
      * Guarda las filas en el [libro]. Con [corregirFechas], las fechas fuera del mes de su hoja
@@ -152,7 +202,21 @@ object ImportarExcel {
             ))
             if (prev == null) nuevos++ else act++
         }
-        return Resultado(nuevos, act, creadas)
+        var nd = 0; var nf = 0
+        for (h in hojas) {
+            for (d in h.deudas) {
+                val uid = "xd" + hash("${h.nombre}|${d.fila}")
+                val prev = db.deudas().byUid(uid)
+                db.deudas().upsert((prev ?: Deuda(uid = uid, libro = libro, sentido = Sentido.DEBO, nombre = d.nombre, moneda = d.moneda,
+                    total = d.monto, fecha = d.fecha ?: Fechas.hoy(), notas = "Importada de ${h.nombre}")).copy(total = d.monto))
+                nd++
+            }
+            for ((i, t) in h.faltantes.withIndex()) {
+                val uid = "xf" + hash("${h.nombre}|$t")
+                if (db.faltantes().byUid(uid) == null) { db.faltantes().upsert(Faltante(uid = uid, libro = "Tienda", texto = t, creado = System.currentTimeMillis() + i)); nf++ }
+            }
+        }
+        return Resultado(nuevos, act, creadas, nd, nf)
     }
 
     // ---------- XML ----------

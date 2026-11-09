@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Refresh
@@ -43,6 +44,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import app.elduro.core.CarpetaSync
+import app.elduro.core.Control
+import app.elduro.core.Exportar
+import app.elduro.core.Vigilante
 import app.elduro.core.ConsultaTasas
 import app.elduro.core.Duro
 import app.elduro.core.Fechas
@@ -50,7 +54,9 @@ import app.elduro.core.Prefs
 import app.elduro.core.TablaTasas
 import app.elduro.core.Vista
 import app.elduro.data.ElDuroDb
+import app.elduro.data.Faltante
 import app.elduro.data.Movimiento
+import app.elduro.data.Tipo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -127,6 +133,21 @@ class EstadoApp(val ctx: Context) {
         }
     }
 
+    /** Exporta el mes y libro actuales y abre el menú de compartir. */
+    fun exportar(scope: CoroutineScope, excel: Boolean) = io(scope) {
+        val f = if (excel) Exportar.xlsxMes(ctx, libro, mes) else Exportar.pdfMes(ctx, libro, mes, vista)
+        withContext(Dispatchers.Main) {
+            avisos.showSnackbar("Guardado en ${f.parentFile?.name}/${f.name}")
+        }
+        compartir(f, if (excel) "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" else "application/pdf")
+    }
+
+    fun compartir(f: java.io.File, mime: String) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".archivos", f)
+        val i = Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        ctx.startActivity(Intent.createChooser(i, f.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     fun pedirPermiso() {
         val i = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { ctx.startActivity(i) }.onFailure { ctx.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -141,7 +162,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         estado = EstadoApp(applicationContext)
         CarpetaSync.iniciar(applicationContext)
+        Vigilante.programar(applicationContext)
         lifecycleScope.launch(Dispatchers.IO) { runCatching { Duro.sembrar(estado.db) } }
+        if (android.os.Build.VERSION.SDK_INT >= 33 && !Prefs.sp(this).getBoolean("pidio_notis", false) &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Prefs.sp(this).edit().putBoolean("pidio_notis", true).apply()
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
         setContent { TemaElDuro { Raiz(estado) } }
     }
 
@@ -150,10 +177,14 @@ class MainActivity : ComponentActivity() {
         estado.acceso = Prefs.tieneAcceso()
         estado.sincronizar(lifecycleScope, mostrar = false)
         estado.refrescarTasas(lifecycleScope, forzar = false)
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { Control.procesarRecurrentes(estado.db) }
+            runCatching { Exportar.zipSiToca(applicationContext) }
+        }
     }
 }
 
-private enum class Pestana(val titulo: String) { MES("Mes"), CARTERAS("Carteras"), TASAS("Tasas"), AJUSTES("Ajustes") }
+private enum class Pestana(val titulo: String) { MES("Mes"), CARTERAS("Carteras"), CONTROL("Control"), TASAS("Tasas"), AJUSTES("Ajustes") }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -161,12 +192,19 @@ private fun Raiz(e: EstadoApp) {
     val scope = rememberCoroutineScope()
     var pestana by remember { mutableStateOf(Pestana.MES) }
     var editor by remember { mutableStateOf<Movimiento?>(null) }
+    var plantilla by remember { mutableStateOf<Movimiento?>(null) }
+    var faltanteEnCompra by remember { mutableStateOf<Faltante?>(null) }
     var editorAbierto by remember { mutableStateOf(false) }
 
     val carteras by e.db.carteras().flow().collectAsState(emptyList())
     val movs by e.db.movimientos().flow().collectAsState(emptyList())
     val tasasLista by e.db.tasas().flow().collectAsState(emptyList())
     val tabla = remember(tasasLista) { TablaTasas(tasasLista) }
+    val deudas by e.db.deudas().flow().collectAsState(emptyList())
+    val recurrentes by e.db.recurrentes().flow().collectAsState(emptyList())
+    val presupuestos by e.db.presupuestos().flow().collectAsState(emptyList())
+    val faltantes by e.db.faltantes().flow().collectAsState(emptyList())
+    val datos = DatosControl(carteras, movs, tabla, deudas, recurrentes, presupuestos, faltantes)
 
     LaunchedEffect(Unit) { e.sync = e.textoSync() }
 
@@ -190,6 +228,7 @@ private fun Raiz(e: EstadoApp) {
                     NavigationBarItem(selected = pestana == p, onClick = { pestana = p }, label = { Text(p.titulo) }, icon = {
                         Icon(when (p) {
                             Pestana.MES -> Icons.Filled.DateRange; Pestana.CARTERAS -> Icons.Filled.AccountBox
+                            Pestana.CONTROL -> Icons.Filled.CheckCircle
                             Pestana.TASAS -> Icons.Filled.Refresh; Pestana.AJUSTES -> Icons.Filled.Settings
                         }, null)
                     })
@@ -198,7 +237,7 @@ private fun Raiz(e: EstadoApp) {
         },
         floatingActionButton = {
             if (pestana == Pestana.MES || pestana == Pestana.CARTERAS)
-                FloatingActionButton(onClick = { editor = null; editorAbierto = true }, containerColor = MaterialTheme.colorScheme.secondaryContainer) {
+                FloatingActionButton(onClick = { editor = null; plantilla = null; editorAbierto = true }, containerColor = MaterialTheme.colorScheme.secondaryContainer) {
                     Icon(Icons.Filled.Add, "Nuevo movimiento")
                 }
         },
@@ -206,8 +245,13 @@ private fun Raiz(e: EstadoApp) {
     ) { pad ->
         val mod = Modifier.padding(pad)
         when (pestana) {
-            Pestana.MES -> PantallaMes(e, carteras, movs, tabla, mod) { editor = it; editorAbierto = true }
+            Pestana.MES -> PantallaMes(e, datos, mod) { editor = it; plantilla = null; editorAbierto = true }
             Pestana.CARTERAS -> PantallaCarteras(e, carteras, movs, tabla, mod)
+            Pestana.CONTROL -> PantallaControl(e, datos, mod) { f ->
+                faltanteEnCompra = f; editor = null
+                plantilla = Movimiento(uid = "", fecha = hoy(), tipo = Tipo.GASTO, carteraId = 0, monto = 0, categoria = "Tienda", descripcion = f.texto)
+                editorAbierto = true
+            }
             Pestana.TASAS -> PantallaTasas(e, tabla, tasasLista, movs, mod)
             Pestana.AJUSTES -> PantallaAjustes(e, mod)
         }
@@ -215,9 +259,13 @@ private fun Raiz(e: EstadoApp) {
 
     if (editorAbierto) {
         EditorMovimiento(
-            e = e, inicial = editor, carteras = carteras, tabla = tabla,
-            onCerrar = { editorAbierto = false },
-            onGuardar = { e.guardar(scope, it); editorAbierto = false },
+            e = e, inicial = editor, carteras = carteras, tabla = tabla, plantilla = plantilla,
+            onCerrar = {
+                editorAbierto = false
+                // si cancela la compra de un faltante, vuelve a quedar pendiente
+                faltanteEnCompra?.let { f -> e.io(scope) { e.db.faltantes().upsert(f.copy(comprado = false)) } }; faltanteEnCompra = null
+            },
+            onGuardar = { e.guardar(scope, it); editorAbierto = false; faltanteEnCompra = null },
             onBorrar = { e.borrar(scope, it); editorAbierto = false },
         )
     }

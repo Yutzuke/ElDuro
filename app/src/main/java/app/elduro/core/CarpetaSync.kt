@@ -5,6 +5,12 @@ import android.util.Log
 import androidx.room.InvalidationTracker
 import androidx.room.withTransaction
 import app.elduro.data.Cartera
+import app.elduro.data.Deuda
+import app.elduro.data.Faltante
+import app.elduro.data.Frecuencia
+import app.elduro.data.Presupuesto
+import app.elduro.data.Recurrente
+import app.elduro.data.Sentido
 import app.elduro.data.ElDuroDb
 import app.elduro.data.Forma
 import app.elduro.data.Moneda
@@ -34,7 +40,8 @@ object CarpetaSync {
     private const val TAG = "CarpetaSync"
     private const val SEP = ';'
     private const val BOM = "﻿"
-    private val CAB_MOV = listOf("id", "fecha", "tipo", "cartera", "monto", "destino", "monto_destino", "tasa", "categoria", "descripcion")
+    private val CAB_MOV = listOf("id", "fecha", "tipo", "cartera", "monto", "destino", "monto_destino", "tasa", "categoria", "descripcion", "deuda")
+    private val GLOBALES = listOf("carteras.csv", "tasas.csv", "deudas.csv", "recurrentes.csv", "presupuestos.csv", "faltantes.csv")
     private val reMes = Regex("""\d{4}-\d{2}\.csv""")
 
     private val exec = Executors.newSingleThreadScheduledExecutor()
@@ -53,7 +60,7 @@ object CarpetaSync {
         if (iniciado) return
         iniciado = true
         val app = ctx.applicationContext
-        ElDuroDb.get(app).invalidationTracker.addObserver(object : InvalidationTracker.Observer(arrayOf("Movimiento", "Cartera", "Tasa")) {
+        ElDuroDb.get(app).invalidationTracker.addObserver(object : InvalidationTracker.Observer(arrayOf("Movimiento", "Cartera", "Tasa", "Deuda", "Recurrente", "Presupuesto", "Faltante")) {
             override fun onInvalidated(tables: Set<String>) = programarExport(app)
         })
     }
@@ -102,9 +109,22 @@ object CarpetaSync {
             db.tasas().all().sortedWith(compareBy({ it.fecha }, { it.fuente }, { it.origen }))
                 .map { listOf(it.fecha, it.fuente, it.origen, it.valor.toString().replace('.', ',')) })
 
+        val deudas = db.deudas().all()
+        val deudaUid = deudas.associate { it.id to it.uid }
+        archivos[File(base, "deudas.csv")] = csv(listOf("id", "libro", "sentido", "nombre", "moneda", "total", "fecha", "cuotas", "frecuencia_dias", "primer_vence", "es_gasto", "categoria", "notas", "cerrada"),
+            deudas.map { listOf(it.uid, it.libro, it.sentido.etiqueta, it.nombre, it.moneda.name, Dinero.csv(it.total), it.fecha, it.cuotas.toString(),
+                it.frecuenciaDias.toString(), it.primerVence.orEmpty(), si(it.esGasto), it.categoria, it.notas, si(it.cerrada)) })
+        archivos[File(base, "recurrentes.csv")] = csv(listOf("id", "libro", "tipo", "cartera", "monto", "categoria", "descripcion", "frecuencia", "proxima", "automatico", "activa"),
+            db.recurrentes().all().map { listOf(it.uid, it.libro, it.tipo.etiqueta, porId[it.carteraId]?.nombre ?: "?", Dinero.csv(it.monto), it.categoria,
+                it.descripcion, it.frecuencia.name, it.proxima, si(it.automatico), si(it.activa)) })
+        archivos[File(base, "presupuestos.csv")] = csv(listOf("libro", "categoria", "monto", "moneda"),
+            db.presupuestos().all().map { listOf(it.libro, it.categoria, Dinero.csv(it.monto), it.moneda.name) })
+        archivos[File(base, "faltantes.csv")] = csv(listOf("id", "libro", "texto", "comprado"),
+            db.faltantes().all().sortedBy { it.creado }.map { listOf(it.uid, it.libro, it.texto, si(it.comprado)) })
+
         val movs = db.movimientos().all()
         movs.groupBy { (porId[it.carteraId]?.libro ?: "Sin libro") to it.fecha.take(7) }.forEach { (k, lista) ->
-            archivos[File(base, "${k.first}/${k.second}.csv")] = csv(CAB_MOV, lista.map { filaMov(it, porId) })
+            archivos[File(base, "${k.first}/${k.second}.csv")] = csv(CAB_MOV, lista.map { filaMov(it, porId, deudaUid) })
         }
         // meses que quedaron vacíos: dejamos el archivo sólo con la cabecera
         base.listFiles().orEmpty().filter { it.isDirectory && !it.name.startsWith(".") }.forEach { dir ->
@@ -127,12 +147,16 @@ object CarpetaSync {
         return n
     }
 
-    private fun filaMov(m: Movimiento, porId: Map<Long, Cartera>): List<String> {
+    private fun si(b: Boolean) = if (b) "si" else ""
+    private fun esSi(s: String?) = s?.trim()?.lowercase() in setOf("si", "sí", "1", "true", "x")
+
+    private fun filaMov(m: Movimiento, porId: Map<Long, Cartera>, deudaUid: Map<Long, String> = emptyMap()): List<String> {
         val c = porId[m.carteraId]
         val d = m.carteraDestinoId?.let { porId[it] }
         val dNombre = when { d == null -> ""; d.libro == c?.libro -> d.nombre; else -> "${d.libro}/${d.nombre}" }
         return listOf(m.uid, m.fecha, m.tipo.etiqueta, c?.nombre ?: "?", Dinero.csv(m.monto), dNombre,
-            m.montoDestino?.let { Dinero.csv(it) } ?: "", m.tasa?.toString()?.replace('.', ',') ?: "", m.categoria, m.descripcion)
+            m.montoDestino?.let { Dinero.csv(it) } ?: "", m.tasa?.toString()?.replace('.', ',') ?: "", m.categoria, m.descripcion,
+            m.deudaId?.let { deudaUid[it] }.orEmpty())
     }
 
     // ---------- importar ----------
@@ -147,8 +171,7 @@ object CarpetaSync {
             val actual = sha1(f.readBytes())
             if (h.getString(clave(base, f), null) != actual) cambiados += f
         }
-        revisar(File(base, "carteras.csv"))
-        revisar(File(base, "tasas.csv"))
+        GLOBALES.forEach { revisar(File(base, it)) }
         base.listFiles().orEmpty().filter { it.isDirectory && !it.name.startsWith(".") }.sortedBy { it.name }.forEach { dir ->
             dir.listFiles().orEmpty().filter { reMes.matches(it.name) }.sortedBy { it.name }.forEach(::revisar)
         }
@@ -162,6 +185,10 @@ object CarpetaSync {
                         when {
                             f.name == "carteras.csv" && f.parentFile == base -> importarCarteras(db, f)
                             f.name == "tasas.csv" && f.parentFile == base -> importarTasas(db, f)
+                            f.name == "deudas.csv" && f.parentFile == base -> importarDeudas(db, f)
+                            f.name == "recurrentes.csv" && f.parentFile == base -> importarRecurrentes(db, f)
+                            f.name == "presupuestos.csv" && f.parentFile == base -> importarPresupuestos(db, f)
+                            f.name == "faltantes.csv" && f.parentFile == base -> importarFaltantes(db, f)
                             else -> importarMes(app, db, base, f, avisos)
                         }
                         hechos += clave(base, f)
@@ -188,6 +215,70 @@ object CarpetaSync {
             )
             db.carteras().upsert(c)
         }
+    }
+
+    private fun importarDeudas(db: ElDuroDb, f: File) {
+        val vistos = HashSet<String>()
+        for (r in leerCsv(f)) {
+            val nombre = r["nombre"].orEmpty().trim(); val total = Dinero.parse(r["total"].orEmpty()) ?: continue
+            if (nombre.isEmpty()) continue
+            val uid = r["id"]?.trim()?.ifEmpty { null } ?: Duro.uid()
+            vistos += uid
+            val prev = db.deudas().byUid(uid)
+            val sentido = if (Categorias.normal(r["sentido"].orEmpty()).contains("deben")) Sentido.ME_DEBEN else Sentido.DEBO
+            db.deudas().upsert(Deuda(
+                id = prev?.id ?: 0, uid = uid, libro = r["libro"].orEmpty().trim().ifEmpty { Duro.LIBROS.first() }, sentido = sentido,
+                nombre = nombre, moneda = runCatching { Moneda.valueOf(r["moneda"]!!.trim().uppercase()) }.getOrDefault(Moneda.BS),
+                total = kotlin.math.abs(total), fecha = normalizarFecha(r["fecha"].orEmpty()) ?: Fechas.hoy(),
+                cuotas = r["cuotas"]?.trim()?.toIntOrNull() ?: 0, frecuenciaDias = r["frecuencia_dias"]?.trim()?.toIntOrNull() ?: 0,
+                primerVence = r["primer_vence"]?.let { normalizarFecha(it) }, esGasto = esSi(r["es_gasto"]),
+                categoria = r["categoria"].orEmpty().trim(), notas = r["notas"].orEmpty().trim(), cerrada = esSi(r["cerrada"]),
+            ))
+        }
+        db.deudas().all().filter { it.uid !in vistos }.forEach { db.movimientos().soltarDeuda(it.id); db.deudas().delete(it.id) }
+    }
+
+    private fun importarRecurrentes(db: ElDuroDb, f: File) {
+        val carteras = db.carteras().all()
+        val vistos = HashSet<String>()
+        for (r in leerCsv(f)) {
+            val libro = r["libro"].orEmpty().trim().ifEmpty { Duro.LIBROS.first() }
+            val c = carteras.firstOrNull { it.libro == libro && it.nombre.equals(r["cartera"].orEmpty().trim(), true) } ?: continue
+            val monto = Dinero.parse(r["monto"].orEmpty()) ?: continue
+            val uid = r["id"]?.trim()?.ifEmpty { null } ?: Duro.uid()
+            vistos += uid
+            val prev = db.recurrentes().byUid(uid)
+            db.recurrentes().upsert(Recurrente(
+                id = prev?.id ?: 0, uid = uid, libro = libro, tipo = if (Categorias.normal(r["tipo"].orEmpty()).startsWith("entrada")) Tipo.ENTRADA else Tipo.GASTO,
+                carteraId = c.id, monto = kotlin.math.abs(monto), categoria = r["categoria"].orEmpty().trim(), descripcion = r["descripcion"].orEmpty().trim(),
+                frecuencia = runCatching { Frecuencia.valueOf(r["frecuencia"]!!.trim().uppercase()) }.getOrDefault(Frecuencia.MENSUAL),
+                proxima = normalizarFecha(r["proxima"].orEmpty()) ?: Fechas.hoy(), automatico = esSi(r["automatico"]), activa = esSi(r["activa"]),
+            ))
+        }
+        db.recurrentes().all().filter { it.uid !in vistos }.forEach { db.recurrentes().delete(it.id) }
+    }
+
+    private fun importarPresupuestos(db: ElDuroDb, f: File) {
+        val lista = leerCsv(f).mapNotNull { r ->
+            val m = Dinero.parse(r["monto"].orEmpty()) ?: return@mapNotNull null
+            val cat = r["categoria"].orEmpty().trim().ifEmpty { return@mapNotNull null }
+            Presupuesto(r["libro"].orEmpty().trim().ifEmpty { Duro.LIBROS.first() }, cat, kotlin.math.abs(m),
+                runCatching { Moneda.valueOf(r["moneda"]!!.trim().uppercase()) }.getOrDefault(Moneda.USD))
+        }
+        db.presupuestos().clear(); lista.forEach { db.presupuestos().upsert(it) }
+    }
+
+    private fun importarFaltantes(db: ElDuroDb, f: File) {
+        val vistos = HashSet<String>()
+        for ((i, r) in leerCsv(f).withIndex()) {
+            val texto = r["texto"].orEmpty().trim().ifEmpty { null } ?: continue
+            val uid = r["id"]?.trim()?.ifEmpty { null } ?: Duro.uid()
+            vistos += uid
+            val prev = db.faltantes().byUid(uid)
+            db.faltantes().upsert(Faltante(prev?.id ?: 0, uid, r["libro"].orEmpty().trim().ifEmpty { "Tienda" }, texto, esSi(r["comprado"]),
+                prev?.creado ?: (System.currentTimeMillis() + i)))
+        }
+        db.faltantes().all().filter { it.uid !in vistos }.forEach { db.faltantes().delete(it.id) }
     }
 
     private fun importarTasas(db: ElDuroDb, f: File) {
@@ -220,13 +311,15 @@ object CarpetaSync {
             return nueva.copy(id = id).also { carteras += it }
         }
         val porId = carteras.associateBy { it.id }
+        val deudaPorUid = db.deudas().all().associate { it.uid to it.id }
         val antes = db.movimientos().all().filter { porId[it.carteraId]?.libro == libro && it.fecha.startsWith(ym) }
 
         // respaldo de lo que había antes de aplicar el archivo
         if (antes.isNotEmpty()) {
             val dir = File(base, ".anteriores").apply { mkdirs() }
             val sello = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())
-            File(dir, "$libro-$ym-$sello.csv").writeText(BOM + csv(CAB_MOV, antes.map { filaMov(it, porId) }))
+            val du = db.deudas().all().associate { it.id to it.uid }
+            File(dir, "$libro-$ym-$sello.csv").writeText(BOM + csv(CAB_MOV, antes.map { filaMov(it, porId, du) }))
             dir.listFiles().orEmpty().sortedByDescending { it.name }.drop(60).forEach { it.delete() }
         }
 
@@ -244,18 +337,19 @@ object CarpetaSync {
             val firmado = when (tipo) {
                 Tipo.GASTO -> -kotlin.math.abs(monto)
                 Tipo.ENTRADA -> kotlin.math.abs(monto)
-                Tipo.TRANSFERENCIA -> -kotlin.math.abs(monto)
+                Tipo.TRANSFERENCIA -> if (r["deuda"].orEmpty().isNotBlank()) monto else -kotlin.math.abs(monto)  // cobros entran
                 else -> monto
             }
             val tasa = r["tasa"]?.let { Dinero.parseDouble(it) }
-            val md = if (d != null) (Dinero.parse(r["monto_destino"].orEmpty())?.let { kotlin.math.abs(it) }
-                ?: EntradaRapida.montoDestino(kotlin.math.abs(firmado), c.moneda, d.moneda, tasa)) else null
+            val md = if (d != null || r["deuda"].orEmpty().isNotBlank()) (Dinero.parse(r["monto_destino"].orEmpty())?.let { kotlin.math.abs(it) }
+                ?: EntradaRapida.montoDestino(kotlin.math.abs(firmado), c.moneda, d?.moneda ?: c.moneda, tasa)) else null
             val prev = db.movimientos().byUid(uid)
             db.movimientos().upsert(
                 Movimiento(id = prev?.id ?: 0, uid = uid, fecha = fecha, tipo = tipo, carteraId = c.id, monto = firmado,
                     carteraDestinoId = d?.id, montoDestino = md, tasa = tasa,
                     categoria = r["categoria"].orEmpty().trim(), descripcion = r["descripcion"].orEmpty().trim(),
-                    creado = prev?.creado ?: (System.currentTimeMillis() + i))
+                    creado = prev?.creado ?: (System.currentTimeMillis() + i),
+                    deudaId = r["deuda"]?.trim()?.let { deudaPorUid[it] })
             )
         }
         val borrar = antes.map { it.uid }.filter { it !in vistos }

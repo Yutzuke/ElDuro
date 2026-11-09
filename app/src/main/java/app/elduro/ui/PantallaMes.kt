@@ -31,7 +31,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,13 +56,15 @@ import app.elduro.data.Movimiento
 import app.elduro.data.Tipo
 
 @Composable
-fun PantallaMes(
-    e: EstadoApp, carteras: List<Cartera>, movs: List<Movimiento>, tabla: TablaTasas,
-    modifier: Modifier, onEditar: (Movimiento) -> Unit,
-) {
+fun PantallaMes(e: EstadoApp, d: DatosControl, modifier: Modifier, onEditar: (Movimiento) -> Unit) {
+    val carteras = d.carteras; val movs = d.movs; val tabla = d.tabla
     val porId = remember(carteras) { carteras.associateBy { it.id } }
     val delLibro = remember(movs, porId, e.libro) { Finanzas.delLibro(movs, porId, e.libro) }
-    val res = remember(delLibro, porId, e.libro, e.mes, tabla, e.vista) { Finanzas.resumen(delLibro, porId, e.libro, e.mes, tabla, e.vista) }
+    val res = remember(delLibro, porId, e.libro, e.mes, tabla, e.vista, d.deudas) { Finanzas.resumen(delLibro, porId, e.libro, e.mes, tabla, e.vista, d.deudas) }
+    val ant = remember(delLibro, porId, e.libro, e.mes, tabla, e.vista, d.deudas) { Finanzas.resumen(delLibro, porId, e.libro, e.mes.minusMonths(1), tabla, e.vista, d.deudas) }
+    val avances = remember(d.presupuestos, delLibro, d.deudas, e.libro, e.mes, tabla) {
+        app.elduro.core.Control.avances(d.presupuestos, delLibro, d.deudas, porId, e.libro, e.mes, tabla).associateBy { it.p.categoria }
+    }
     val ym = e.mes.toString()
     val delMes = remember(delLibro, ym) { delLibro.filter { it.fecha.startsWith(ym) } }
 
@@ -68,10 +72,12 @@ fun PantallaMes(
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (!e.acceso) item { AvisoPermiso(e) }
         item { TarjetaTasas(e, tabla) }
+        item { TarjetaPendientes(e, d) }
         item { SelectorMes(e) }
-        item { TarjetaResumen(res, e.vista) }
+        item { TarjetaResumen(res, ant, e.vista) }
         item { TarjetaCarteras(res, e.vista) }
-        if (res.porCategoria.isNotEmpty()) item { TarjetaCategorias(res, e.vista) }
+        if (res.porCategoria.isNotEmpty()) item { TarjetaCategorias(res, e.vista, avances) }
+        item { BotonesExportar(e) }
         item {
             Text("Movimientos (${delMes.size})", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
             if (delMes.isEmpty()) Text("Toca + para anotar. Ej.: «-8000 pollo», «+15$ venta», «20$ > bs 1048».",
@@ -149,7 +155,7 @@ private fun SelectorMes(e: EstadoApp) {
 }
 
 @Composable
-private fun TarjetaResumen(r: Finanzas.Resumen, v: Vista) {
+private fun TarjetaResumen(r: Finanzas.Resumen, ant: Finanzas.Resumen, v: Vista) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row {
@@ -166,6 +172,13 @@ private fun TarjetaResumen(r: Finanzas.Resumen, v: Vista) {
             if (res < 0 && r.gastos > 0) Text("⚠ Gastaste más de lo que entró", color = Colores.gasto(), style = MaterialTheme.typography.bodySmall)
             if (kotlin.math.abs(r.ajustes) > 0.004) Linea("Descuadres (arqueos)", Dinero.fmtVista(r.ajustes, v, true))
             if (kotlin.math.abs(r.cambiaria) > 0.004) Linea("Ganancia/pérdida en cambios", Dinero.fmtVista(r.cambiaria, v, true))
+            r.devaluacion?.takeIf { kotlin.math.abs(it) > 0.004 }?.let { Linea("Devaluación de tus Bs (aprox.)", Dinero.fmtVista(it, v, true)) }
+            if (r.credito > 0.004) Text("Incluye ${Dinero.fmtVista(r.credito, v)} en compras a crédito", style = MaterialTheme.typography.bodySmall, color = Colores.neutro())
+            if (ant.gastos > 0.004 || ant.entradas > 0.004) {
+                fun pct(a: Double, b: Double) = if (b > 0.004) "${if (a >= b) "+" else ""}${((a - b) / b * 100).toInt()}%" else "—"
+                Text("vs mes anterior: entradas ${pct(r.entradas, ant.entradas)} · gastos ${pct(r.gastos, ant.gastos)}",
+                    style = MaterialTheme.typography.bodySmall, color = Colores.neutro())
+            }
             if (r.estimadas > 0) Text("🟡 ${r.estimadas} conversiones con tasa estimada (se corrigen solas al llegar la real)",
                 style = MaterialTheme.typography.bodySmall, color = Colores.aviso())
             if (r.sinTasa > 0) Text("⚠ ${r.sinTasa} movimientos sin tasa para convertir: actualiza o anota una tasa",
@@ -223,7 +236,7 @@ private fun androidx.compose.foundation.layout.RowScope.Celda(t: String, cabecer
 }
 
 @Composable
-private fun TarjetaCategorias(r: Finanzas.Resumen, v: Vista) {
+private fun TarjetaCategorias(r: Finanzas.Resumen, v: Vista, avances: Map<String, app.elduro.core.Control.Avance>) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Gastos por categoría", style = MaterialTheme.typography.titleSmall)
@@ -232,7 +245,10 @@ private fun TarjetaCategorias(r: Finanzas.Resumen, v: Vista) {
                 Column {
                     Row {
                         Text(cat, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        Text("${Dinero.fmtVista(valor, v)} · ${(valor / r.gastos * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                        val a = avances[cat]
+                        Text("${Dinero.fmtVista(valor, v)} · ${(valor / r.gastos * 100).toInt()}%" +
+                                (a?.let { " · tope ${(it.fraccion * 100).toInt()}%" } ?: ""), style = MaterialTheme.typography.bodySmall,
+                            color = when { a == null -> Color.Unspecified; a.fraccion >= 1 -> Colores.gasto(); a.fraccion >= 0.8 -> Colores.aviso(); else -> Color.Unspecified })
                     }
                     LinearProgressIndicator(progress = { (valor / max).toFloat() }, modifier = Modifier.fillMaxWidth().height(6.dp),
                         color = MaterialTheme.colorScheme.secondary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -279,5 +295,53 @@ fun FilaMovimiento(m: Movimiento, porId: Map<Long, Cartera>, tabla: TablaTasas, 
                     style = MaterialTheme.typography.bodySmall, color = if (conv.estimada) Colores.aviso() else Colores.neutro())
             }
         }
+    }
+}
+
+/** Cuotas por vencer (≤ 7 días) y recurrentes que esperan confirmación. */
+@Composable
+private fun TarjetaPendientes(e: EstadoApp, d: DatosControl) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val hoy = hoy()
+    val cuotas = remember(d.deudas, d.movs, e.libro) {
+        app.elduro.core.Control.estados(d.deudas.filter { it.libro == e.libro && !it.cerrada }, d.movs)
+            .filter { (it.diasParaVencer() ?: 99) <= 7 }.sortedBy { it.proximoVence }
+    }
+    val recs = d.recurrentes.filter { it.libro == e.libro && it.activa && !it.automatico && it.proxima <= hoy }
+    if (cuotas.isEmpty() && recs.isEmpty()) return
+    var pagar by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<app.elduro.core.EstadoDeuda?>(null) }
+    val porId = d.carteras.associateBy { it.id }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Pendientes", style = MaterialTheme.typography.titleSmall)
+            for (c in cuotas) Row(verticalAlignment = Alignment.CenterVertically) {
+                val dias = c.diasParaVencer() ?: 0
+                Column(Modifier.weight(1f)) {
+                    Text("${c.deuda.nombre}: ${Dinero.fmt(c.cuota ?: c.saldo, c.deuda.moneda)}", fontWeight = FontWeight.Medium)
+                    Text(when { dias < 0 -> "Vencida hace ${-dias} d"; dias == 0L -> "Vence hoy"; else -> "Vence en $dias d (${Fechas.dmy(c.proximoVence!!)})" },
+                        style = MaterialTheme.typography.bodySmall, color = if (dias <= 0) Colores.gasto() else Colores.neutro())
+                }
+                androidx.compose.material3.TextButton(onClick = { pagar = c }) { Text("Pagar") }
+            }
+            for (r in recs) Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("${r.descripcion}: ${Dinero.fmt(r.monto, porId[r.carteraId]?.moneda ?: Moneda.BS)}", fontWeight = FontWeight.Medium)
+                    Text("${r.tipo.etiqueta} recurrente · tocaba el ${Fechas.dmy(r.proxima)}", style = MaterialTheme.typography.bodySmall, color = Colores.neutro())
+                }
+                androidx.compose.material3.TextButton(onClick = { e.io(scope) { app.elduro.core.Control.registrar(e.db, r, r.proxima) } }) { Text("Registrar") }
+                androidx.compose.material3.TextButton(onClick = { e.io(scope) { app.elduro.core.Control.saltar(e.db, r) } }) { Text("Saltar") }
+            }
+        }
+    }
+    pagar?.let { c -> DialogoAbono(e, c, d.carteras.filter { !it.archivada && it.libro == e.libro }, d.tabla) { pagar = null } }
+}
+
+@Composable
+private fun BotonesExportar(e: EstadoApp) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Exportar ${Fechas.mes(e.mes.toString()).lowercase()}:", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        androidx.compose.material3.OutlinedButton(onClick = { e.exportar(scope, excel = true) }) { Text("Excel") }
+        androidx.compose.material3.OutlinedButton(onClick = { e.exportar(scope, excel = false) }) { Text("PDF") }
     }
 }

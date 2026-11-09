@@ -1,6 +1,7 @@
 package app.elduro.core
 
 import app.elduro.data.Cartera
+import app.elduro.data.Deuda
 import app.elduro.data.Forma
 import app.elduro.data.Moneda
 import app.elduro.data.Movimiento
@@ -23,6 +24,8 @@ object Finanzas {
         val patrimonio: Double,             // saldos convertidos a la vista
         val estimadas: Int,                 // movimientos convertidos con tasa estimada
         val sinTasa: Int,                   // movimientos que no se pudieron convertir
+        val devaluacion: Double?,           // pérdida (negativa) de los Bs guardados al inicio del mes, en $
+        val credito: Double,                // compras a crédito incluidas en gastos
     ) {
         val resultado get() = entradas - gastos
     }
@@ -44,7 +47,7 @@ object Finanzas {
 
     fun resumen(
         movsLibro: List<Movimiento>, carteras: Map<Long, Cartera>, libro: String,
-        mes: YearMonth, tasas: TablaTasas, vista: Vista,
+        mes: YearMonth, tasas: TablaTasas, vista: Vista, deudas: List<Deuda> = emptyList(),
     ): Resumen {
         val ym = mes.toString()
         val fin = mes.atEndOfMonth().toString()
@@ -79,6 +82,13 @@ object Finanzas {
             }
         }
 
+        // compras a crédito: gasto del mes en que se compró
+        var credito = 0.0
+        for (d in deudas) {
+            if (!d.esGasto || d.libro != libro || !d.fecha.startsWith(ym)) continue
+            conv(d.total, d.moneda, d.fecha)?.let { credito += it; gastos += it; cats.merge(d.categoria.ifBlank { "Otros" }, it, Double::plus) }
+        }
+
         val corte = if (fin < hoy) fin else hoy
         val saldos = saldos(movsLibro, fin)
         val delLibro = carteras.values.filter { it.libro == libro }
@@ -88,8 +98,18 @@ object Finanzas {
         var patrimonio = 0.0
         for (c in celdas) tasas.convertir(c.centimos, c.moneda, corte, vista)?.let { patrimonio += it.valor }
 
+        // devaluación: los Bs que había al empezar el mes, valorados al inicio y al cierre
+        var deval: Double? = null
+        if (vista != Vista.BS && mes.atDay(1).toString() <= hoy) {
+            val antes = mes.atDay(1).minusDays(1).toString()
+            val s0 = saldos(movsLibro, antes).filterKeys { carteras[it]?.libro == libro && carteras[it]?.moneda == Moneda.BS }.values.sum()
+            val r0 = tasas.convertir(s0, Moneda.BS, antes, vista)?.valor
+            val r1 = tasas.convertir(s0, Moneda.BS, corte, vista)?.valor
+            if (s0 != 0L && r0 != null && r1 != null) deval = r1 - r0
+        }
+
         return Resumen(entradas, gastos, ajustes, cambiaria,
             cats.entries.filter { it.value > 0 }.sortedByDescending { it.value }.map { it.key to it.value },
-            celdas, patrimonio, est, sin)
+            celdas, patrimonio, est, sin, deval, credito)
     }
 }

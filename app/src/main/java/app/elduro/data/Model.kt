@@ -49,6 +49,8 @@ data class Movimiento(
     val categoria: String = "",
     val descripcion: String = "",
     val creado: Long = System.currentTimeMillis(),
+    /** Abono/cobro de una deuda: [montoDestino] es lo que se descuenta de la deuda (en su moneda). */
+    val deudaId: Long? = null,
 )
 
 /** Tasa Bs por dólar de una fuente en una fecha. origen: manual > auto > paralelo. */
@@ -66,4 +68,69 @@ data class Tasa(
 data class Aprendizaje(
     @PrimaryKey val palabra: String,
     val categoria: String,
+)
+
+enum class Sentido(val etiqueta: String) { DEBO("Debo"), ME_DEBEN("Me deben") }
+
+/**
+ * Deuda u obligación. Su saldo = [total] − abonos (movimientos con deudaId).
+ * Si [esGasto], la compra a crédito cuenta como gasto del mes de [fecha]; los pagos son transferencias.
+ */
+@Entity(indices = [Index(value = ["uid"], unique = true)])
+data class Deuda(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val uid: String,
+    val libro: String,
+    val sentido: Sentido,
+    val nombre: String,
+    val moneda: Moneda,
+    val total: Long,
+    val fecha: String,
+    val cuotas: Int = 0,               // 0 = sin plan de cuotas
+    val frecuenciaDias: Int = 0,        // 7, 14, 15, 30…
+    val primerVence: String? = null,
+    val esGasto: Boolean = false,
+    val categoria: String = "",
+    val notas: String = "",
+    val cerrada: Boolean = false,
+)
+
+enum class Frecuencia(val etiqueta: String, val dias: Int) {
+    SEMANAL("Semanal", 7), QUINCENAL("Cada 14 días", 14), MENSUAL("Mensual", 0);
+}
+
+/** Movimiento que se repite (servicios, sueldo, alquiler). */
+@Entity(indices = [Index(value = ["uid"], unique = true)])
+data class Recurrente(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val uid: String,
+    val libro: String,
+    val tipo: Tipo,                     // GASTO o ENTRADA
+    val carteraId: Long,
+    val monto: Long,                    // positivo
+    val categoria: String,
+    val descripcion: String,
+    val frecuencia: Frecuencia,
+    val proxima: String,
+    val automatico: Boolean = false,    // true: se registra solo; false: se propone
+    val activa: Boolean = true,
+)
+
+/** Tope mensual de gasto por categoría, en [moneda] (USD se compara en $ BCV). */
+@Entity(primaryKeys = ["libro", "categoria"])
+data class Presupuesto(
+    val libro: String,
+    val categoria: String,
+    val monto: Long,
+    val moneda: Moneda,
+)
+
+@Entity(indices = [Index(value = ["uid"], unique = true)])
+data class Faltante(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val uid: String,
+    val libro: String,
+    val texto: String,
+    val comprado: Boolean = false,
+    val creado: Long = System.currentTimeMillis(),
 )

@@ -1,6 +1,7 @@
 package app.elduro.data
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Delete
@@ -21,6 +22,46 @@ class Converters {
     @TypeConverter fun forma(v: String): Forma = Forma.valueOf(v)
     @TypeConverter fun tipo(v: Tipo): String = v.name
     @TypeConverter fun tipo(v: String): Tipo = Tipo.valueOf(v)
+    @TypeConverter fun sentido(v: Sentido): String = v.name
+    @TypeConverter fun sentido(v: String): Sentido = Sentido.valueOf(v)
+    @TypeConverter fun frecuencia(v: Frecuencia): String = v.name
+    @TypeConverter fun frecuencia(v: String): Frecuencia = Frecuencia.valueOf(v)
+}
+
+@Dao
+interface DeudaDao {
+    @Query("SELECT * FROM Deuda ORDER BY cerrada, fecha DESC") fun flow(): Flow<List<Deuda>>
+    @Query("SELECT * FROM Deuda") fun all(): List<Deuda>
+    @Query("SELECT * FROM Deuda WHERE uid = :uid") fun byUid(uid: String): Deuda?
+    @Upsert fun upsert(d: Deuda): Long
+    @Query("DELETE FROM Deuda WHERE id = :id") fun delete(id: Long)
+}
+
+@Dao
+interface RecurrenteDao {
+    @Query("SELECT * FROM Recurrente ORDER BY proxima") fun flow(): Flow<List<Recurrente>>
+    @Query("SELECT * FROM Recurrente") fun all(): List<Recurrente>
+    @Query("SELECT * FROM Recurrente WHERE uid = :uid") fun byUid(uid: String): Recurrente?
+    @Upsert fun upsert(r: Recurrente): Long
+    @Query("DELETE FROM Recurrente WHERE id = :id") fun delete(id: Long)
+}
+
+@Dao
+interface PresupuestoDao {
+    @Query("SELECT * FROM Presupuesto") fun flow(): Flow<List<Presupuesto>>
+    @Query("SELECT * FROM Presupuesto") fun all(): List<Presupuesto>
+    @Upsert fun upsert(p: Presupuesto)
+    @Query("DELETE FROM Presupuesto WHERE libro = :libro AND categoria = :categoria") fun delete(libro: String, categoria: String)
+    @Query("DELETE FROM Presupuesto") fun clear()
+}
+
+@Dao
+interface FaltanteDao {
+    @Query("SELECT * FROM Faltante ORDER BY comprado, creado") fun flow(): Flow<List<Faltante>>
+    @Query("SELECT * FROM Faltante") fun all(): List<Faltante>
+    @Query("SELECT * FROM Faltante WHERE uid = :uid") fun byUid(uid: String): Faltante?
+    @Upsert fun upsert(f: Faltante): Long
+    @Query("DELETE FROM Faltante WHERE id = :id") fun delete(id: Long)
 }
 
 @Dao
@@ -42,6 +83,8 @@ interface MovimientoDao {
     @Upsert fun upsert(m: Movimiento)
     @Delete fun delete(m: Movimiento)
     @Query("DELETE FROM Movimiento WHERE uid IN (:uids)") fun deleteUids(uids: List<String>)
+    @Query("SELECT * FROM Movimiento WHERE deudaId = :id ORDER BY fecha") fun deDeuda(id: Long): List<Movimiento>
+    @Query("UPDATE Movimiento SET deudaId = NULL WHERE deudaId = :id") fun soltarDeuda(id: Long)
 }
 
 @Dao
@@ -60,13 +103,22 @@ interface AprendizajeDao {
     @Upsert fun upsertAll(a: List<Aprendizaje>)
 }
 
-@Database(entities = [Cartera::class, Movimiento::class, Tasa::class, Aprendizaje::class], version = 1, exportSchema = true)
+@Database(
+    entities = [Cartera::class, Movimiento::class, Tasa::class, Aprendizaje::class,
+        Deuda::class, Recurrente::class, Presupuesto::class, Faltante::class],
+    version = 2, exportSchema = true,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
+)
 @TypeConverters(Converters::class)
 abstract class ElDuroDb : RoomDatabase() {
     abstract fun carteras(): CarteraDao
     abstract fun movimientos(): MovimientoDao
     abstract fun tasas(): TasaDao
     abstract fun aprendizaje(): AprendizajeDao
+    abstract fun deudas(): DeudaDao
+    abstract fun recurrentes(): RecurrenteDao
+    abstract fun presupuestos(): PresupuestoDao
+    abstract fun faltantes(): FaltanteDao
 
     companion object {
         @Volatile private var inst: ElDuroDb? = null

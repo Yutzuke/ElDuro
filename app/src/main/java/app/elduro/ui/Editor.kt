@@ -66,7 +66,7 @@ private val TIPOS_EDITABLES = listOf(Tipo.GASTO, Tipo.ENTRADA, Tipo.TRANSFERENCI
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorMovimiento(
-    e: EstadoApp, inicial: Movimiento?, carteras: List<Cartera>, tabla: TablaTasas,
+    e: EstadoApp, inicial: Movimiento?, carteras: List<Cartera>, tabla: TablaTasas, plantilla: Movimiento? = null,
     onCerrar: () -> Unit, onGuardar: (Movimiento) -> Unit, onBorrar: (Movimiento) -> Unit,
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -86,13 +86,14 @@ fun EditorMovimiento(
     var destino by remember { mutableStateOf(inicial?.carteraDestinoId?.let { id -> carteras.firstOrNull { it.id == id } }) }
     var monto by remember { mutableStateOf(inicial?.let { Dinero.csv(abs(it.monto)) } ?: "") }
     var tasa by remember { mutableStateOf(inicial?.tasa?.let { Dinero.tasa(it) } ?: "") }
-    var categoria by remember { mutableStateOf(inicial?.categoria ?: "") }
-    var categoriaManual by remember { mutableStateOf(inicial != null) }
-    var descripcion by remember { mutableStateOf(inicial?.descripcion ?: "") }
+    var categoria by remember { mutableStateOf(inicial?.categoria ?: plantilla?.categoria ?: "") }
+    var categoriaManual by remember { mutableStateOf(inicial != null || plantilla != null) }
+    var descripcion by remember { mutableStateOf(inicial?.descripcion ?: plantilla?.descripcion ?: "") }
     var fecha by remember { mutableStateOf(inicial?.fecha ?: hoy()) }
     var verFecha by remember { mutableStateOf(false) }
     val foco = remember { FocusRequester() }
-    val especial = inicial != null && inicial.tipo !in TIPOS_EDITABLES   // ajuste / apertura
+    val esAbono = inicial?.deudaId != null
+    val especial = inicial != null && (inicial.tipo !in TIPOS_EDITABLES || esAbono)   // ajuste / apertura / abono
 
     fun tasaPorDefecto(): String = tabla.en(Fuente.BINANCE, fecha)?.valor?.let { Dinero.tasa(it) } ?: ""
 
@@ -119,7 +120,7 @@ fun EditorMovimiento(
     val necesitaTasa = tipo == Tipo.TRANSFERENCIA && cartera != null && destino != null &&
             (cartera!!.moneda == app.elduro.data.Moneda.BS) != (destino!!.moneda == app.elduro.data.Moneda.BS)
     val valido = montoC != null && montoC > 0 && cartera != null &&
-            (tipo != Tipo.TRANSFERENCIA || (destino != null && destino!!.id != cartera!!.id && montoDest != null))
+            (tipo != Tipo.TRANSFERENCIA || esAbono || (destino != null && destino!!.id != cartera!!.id && montoDest != null))
 
     fun construir(): Movimiento {
         val c = cartera!!
@@ -127,6 +128,13 @@ fun EditorMovimiento(
             Tipo.ENTRADA -> montoC!!
             Tipo.GASTO, Tipo.TRANSFERENCIA -> -montoC!!
             else -> if ((inicial?.monto ?: 0) < 0) -montoC!! else montoC!!
+        }
+        if (esAbono) {
+            val ini = inicial!!
+            val firm = if (ini.monto < 0) -montoC!! else montoC!!
+            // misma moneda: lo descontado sigue al monto; otra moneda: se escala con la tasa original
+            val md = ini.montoDestino?.let { old -> if (old == abs(ini.monto)) montoC else if (ini.monto != 0L) old * montoC / abs(ini.monto) else old }
+            return ini.copy(fecha = fecha, carteraId = c.id, monto = firm, montoDestino = md, descripcion = descripcion.trim())
         }
         return Movimiento(
             id = inicial?.id ?: 0, uid = inicial?.uid ?: Duro.uid(), fecha = fecha, tipo = tipo, carteraId = c.id, monto = firmado,
@@ -143,9 +151,14 @@ fun EditorMovimiento(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).imePadding().navigationBarsPadding().padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(if (inicial == null) "Nuevo movimiento · ${e.libro}" else "Editar ${inicial.tipo.etiqueta.lowercase()}", style = MaterialTheme.typography.titleLarge)
+            Text(when {
+                inicial == null && plantilla != null -> "Comprado · ${plantilla.descripcion}"
+                inicial == null -> "Nuevo movimiento · ${e.libro}"
+                esAbono -> "Editar pago de deuda"
+                else -> "Editar ${inicial.tipo.etiqueta.lowercase()}"
+            }, style = MaterialTheme.typography.titleLarge)
 
-            if (inicial == null) {
+            if (inicial == null && plantilla == null) {
                 OutlinedTextField(texto, ::aplicarTexto, Modifier.fillMaxWidth().focusRequester(foco),
                     label = { Text("Escribe rápido") }, placeholder = { Text("-8000 pollo · +15$ venta · 20$ > bs 1048") },
                     singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
@@ -187,7 +200,7 @@ fun EditorMovimiento(
                 if (tipo == Tipo.TRANSFERENCIA && destino?.moneda != it.moneda && tasa.isBlank()) tasa = tasaPorDefecto()
             }
 
-            if (tipo == Tipo.TRANSFERENCIA) {
+            if (tipo == Tipo.TRANSFERENCIA && !esAbono) {
                 SelectorCartera("Hacia", destino, todas.filter { it.id != cartera?.id }, mostrarLibro = true) {
                     destino = it; if (it.moneda != cartera?.moneda && tasa.isBlank()) tasa = tasaPorDefecto()
                 }
