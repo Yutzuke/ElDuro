@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- sombra -->
+    <path android:fillColor="#40000000" android:pathData="M55.5,57.5m-27,0a27,27 0,1 1,54 0a27,27 0,1 1,-54 0"/>
+    <!-- moneda -->
+    <path android:pathData="M54,54m-27,0a27,27 0,1 1,54 0a27,27 0,1 1,-54 0">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="30" android:startY="28" android:endX="78" android:endY="80"
+                android:startColor="#FFFFE08A" android:endColor="#FFC8901A" />
+        </aapt:attr>
+    </path>
+    <path android:strokeColor="#FFA8740C" android:strokeWidth="2" android:fillColor="#00000000"
+        android:pathData="M54,54m-22,0a22,22 0,1 1,44 0a22,22 0,1 1,-44 0"/>
+    <!-- D -->
+    <path android:fillColor="#FF14492F" android:fillType="evenOdd"
+        android:pathData="M44,40h9.5a14,14 0,0 1,0 28h-9.5z M50,46v16h3.5a8,8 0,0 0,0 -16z"/>
+</vector>

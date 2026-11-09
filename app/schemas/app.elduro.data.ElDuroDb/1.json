@@ -1,0 +1,276 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "e67752f58c011288b8b40e6dcad73751",
+    "entities": [
+      {
+        "tableName": "Cartera",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `libro` TEXT NOT NULL, `nombre` TEXT NOT NULL, `moneda` TEXT NOT NULL, `forma` TEXT NOT NULL, `orden` INTEGER NOT NULL, `archivada` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libro",
+            "columnName": "libro",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nombre",
+            "columnName": "nombre",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "moneda",
+            "columnName": "moneda",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "forma",
+            "columnName": "forma",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orden",
+            "columnName": "orden",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archivada",
+            "columnName": "archivada",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_Cartera_libro_nombre",
+            "unique": true,
+            "columnNames": [
+              "libro",
+              "nombre"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_Cartera_libro_nombre` ON `${TABLE_NAME}` (`libro`, `nombre`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Movimiento",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `uid` TEXT NOT NULL, `fecha` TEXT NOT NULL, `tipo` TEXT NOT NULL, `carteraId` INTEGER NOT NULL, `monto` INTEGER NOT NULL, `carteraDestinoId` INTEGER, `montoDestino` INTEGER, `tasa` REAL, `categoria` TEXT NOT NULL, `descripcion` TEXT NOT NULL, `creado` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uid",
+            "columnName": "uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fecha",
+            "columnName": "fecha",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tipo",
+            "columnName": "tipo",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "carteraId",
+            "columnName": "carteraId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "monto",
+            "columnName": "monto",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "carteraDestinoId",
+            "columnName": "carteraDestinoId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "montoDestino",
+            "columnName": "montoDestino",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "tasa",
+            "columnName": "tasa",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "categoria",
+            "columnName": "categoria",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "descripcion",
+            "columnName": "descripcion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "creado",
+            "columnName": "creado",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_Movimiento_fecha",
+            "unique": false,
+            "columnNames": [
+              "fecha"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_Movimiento_fecha` ON `${TABLE_NAME}` (`fecha`)"
+          },
+          {
+            "name": "index_Movimiento_carteraId",
+            "unique": false,
+            "columnNames": [
+              "carteraId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_Movimiento_carteraId` ON `${TABLE_NAME}` (`carteraId`)"
+          },
+          {
+            "name": "index_Movimiento_carteraDestinoId",
+            "unique": false,
+            "columnNames": [
+              "carteraDestinoId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_Movimiento_carteraDestinoId` ON `${TABLE_NAME}` (`carteraDestinoId`)"
+          },
+          {
+            "name": "index_Movimiento_uid",
+            "unique": true,
+            "columnNames": [
+              "uid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_Movimiento_uid` ON `${TABLE_NAME}` (`uid`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Tasa",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`fecha` TEXT NOT NULL, `fuente` TEXT NOT NULL, `origen` TEXT NOT NULL, `valor` REAL NOT NULL, `actualizado` INTEGER NOT NULL, PRIMARY KEY(`fecha`, `fuente`, `origen`))",
+        "fields": [
+          {
+            "fieldPath": "fecha",
+            "columnName": "fecha",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fuente",
+            "columnName": "fuente",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "origen",
+            "columnName": "origen",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "valor",
+            "columnName": "valor",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actualizado",
+            "columnName": "actualizado",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "fecha",
+            "fuente",
+            "origen"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Aprendizaje",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`palabra` TEXT NOT NULL, `categoria` TEXT NOT NULL, PRIMARY KEY(`palabra`))",
+        "fields": [
+          {
+            "fieldPath": "palabra",
+            "columnName": "palabra",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "categoria",
+            "columnName": "categoria",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "palabra"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e67752f58c011288b8b40e6dcad73751')"
+    ]
+  }
+}
