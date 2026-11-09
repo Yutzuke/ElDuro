@@ -71,6 +71,35 @@ object CarpetaSync {
         pendiente = exec.schedule({ runCatching { exportar(app) }.onFailure { Log.e(TAG, "export", it); Prefs.setSync(app, it.message) } }, 1500, TimeUnit.MILLISECONDS)
     }
 
+    /**
+     * Renombra un libro: aplica [cambioDb] y mueve su carpeta de CSV, sin pasar por la importación
+     * (si no, los archivos movidos parecerían cambios externos).
+     */
+    fun renombrarLibro(ctx: Context, viejo: String, nuevo: String, cambioDb: () -> Unit) {
+        val app = ctx.applicationContext
+        exec.submit {
+            cambioDb()
+            if (Prefs.tieneAcceso()) {
+                val base = Prefs.carpeta(app)
+                val de = File(base, viejo); val a = File(base, nuevo)
+                // la microSD (exFAT/FAT) no distingue mayúsculas: "tienda" y "Tienda" son la misma carpeta
+                val mismo = viejo.equals(nuevo, ignoreCase = true)
+                if (de.isDirectory) {
+                    if (mismo) { val t = File(base, ".ren-${System.currentTimeMillis()}"); if (de.renameTo(t)) t.renameTo(a) }
+                    else if (!a.exists()) de.renameTo(a)
+                }
+                val h = hashes(app); val e = h.edit()
+                h.all.keys.filter { it.startsWith("$viejo/") }.forEach { e.remove(it) }
+                e.commit()
+                exportar(app)
+                if (!mismo && de.isDirectory) {
+                    de.listFiles().orEmpty().filter { reMes.matches(it.name) }.forEach { it.delete() }
+                    if (de.listFiles().isNullOrEmpty()) de.delete()
+                }
+            }
+        }.get()
+    }
+
     /** Importa cambios externos y luego escribe todo. Seguro de llamar al abrir la app. */
     fun sincronizar(ctx: Context): Informe {
         val app = ctx.applicationContext

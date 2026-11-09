@@ -5,6 +5,7 @@ import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,6 +43,8 @@ import app.elduro.core.Dinero
 import app.elduro.core.Duro
 import app.elduro.core.Fechas
 import app.elduro.core.ImportarExcel
+import app.elduro.core.Libros
+import app.elduro.data.Cartera
 import app.elduro.core.Prefs
 import app.elduro.core.Vista
 import kotlinx.coroutines.Dispatchers
@@ -49,7 +52,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
-fun PantallaAjustes(e: EstadoApp, modifier: Modifier) {
+fun PantallaAjustes(e: EstadoApp, carteras: List<Cartera>, modifier: Modifier) {
     val scope = rememberCoroutineScope()
     var carpeta by remember { mutableStateOf(Prefs.carpeta(e.ctx).path) }
     var hojas by remember { mutableStateOf<List<ImportarExcel.Hoja>?>(null) }
@@ -76,6 +79,7 @@ fun PantallaAjustes(e: EstadoApp, modifier: Modifier) {
                 Vista.entries.forEach { v -> FilterChip(e.vista == v, { e.cambiarVista(v) }, { Text(v.etiqueta) }) }
             }
         }
+        SeccionLibros(e, carteras)
         Seccion("Carpeta de datos") {
             Text(carpeta, fontWeight = FontWeight.Medium)
             Text("CSV legibles (carteras, tasas y un archivo por libro y mes). En NodeSync, Syncthing los lleva solos al PC; " +
@@ -103,7 +107,7 @@ fun PantallaAjustes(e: EstadoApp, modifier: Modifier) {
             modifier = Modifier.align(Alignment.CenterHorizontally))
     }
 
-    hojas?.let { h -> DialogoImportar(e, h, onCerrar = { hojas = null }) { informe = it; hojas = null } }
+    hojas?.let { h -> DialogoImportar(e, h, Libros.activos(e.ctx, carteras), onCerrar = { hojas = null }) { informe = it; hojas = null } }
     informe?.let { t ->
         AlertDialog(onDismissRequest = { informe = null }, text = { Text(t) },
             confirmButton = { TextButton(onClick = { informe = null }) { Text("OK") } })
@@ -121,7 +125,7 @@ private fun Seccion(titulo: String, contenido: @Composable () -> Unit) {
 }
 
 @Composable
-private fun DialogoImportar(e: EstadoApp, hojas: List<ImportarExcel.Hoja>, onCerrar: () -> Unit, onHecho: (String) -> Unit) {
+private fun DialogoImportar(e: EstadoApp, hojas: List<ImportarExcel.Hoja>, libros: List<String>, onCerrar: () -> Unit, onHecho: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val elegidas = remember { mutableStateListOf<String>().apply { addAll(hojas.filter { it.util && Categorias.normal(it.nombre) != "formato" }.map { it.nombre }) } }
     var libro by remember { mutableStateOf(e.libro) }
@@ -150,7 +154,7 @@ private fun DialogoImportar(e: EstadoApp, hojas: List<ImportarExcel.Hoja>, onCer
                 if (apert.isNotEmpty()) Text("Aperturas: " + apert.joinToString { "${Dinero.fmt(it.monto, it.moneda)} ${it.forma.etiqueta.lowercase()}" },
                     style = MaterialTheme.typography.bodySmall)
                 Text("Libro destino", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { Duro.LIBROS.forEach { l -> FilterChip(libro == l, { libro = l }, { Text(l) }) } }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { libros.forEach { l -> FilterChip(libro == l, { libro = l }, { Text(l) }) } }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(corregir, { corregir = it })
                     Text("Corregir fechas fuera del mes de su hoja (como se indica)", style = MaterialTheme.typography.bodySmall)
@@ -190,4 +194,67 @@ fun rutaDeArbol(uri: Uri): String? {
     val vol = id.substringBefore(':'); val rel = id.substringAfter(':', "")
     val base = if (vol.equals("primary", true)) Environment.getExternalStorageDirectory().path else "/storage/$vol"
     return if (rel.isEmpty()) base else "$base/$rel"
+}
+
+@Composable
+private fun SeccionLibros(e: EstadoApp, carteras: List<Cartera>) {
+    val scope = rememberCoroutineScope()
+    val todos = remember(carteras, e.versionLibros) { Libros.todos(e.ctx, carteras) }
+    val archivados = remember(e.versionLibros) { Libros.archivados(e.ctx) }
+    var dialogo by remember { mutableStateOf<String?>(null) }   // "" = nuevo; otro = renombrar ese
+    Seccion("Libros") {
+        Text("Cada libro tiene sus propias carteras, deudas, faltantes y presupuestos. Archivar lo oculta sin borrar nada.",
+            style = MaterialTheme.typography.bodySmall, color = Colores.neutro())
+        todos.forEachIndexed { i, l ->
+            val arch = l in archivados
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(l, fontWeight = FontWeight.SemiBold, color = if (arch) Colores.neutro() else MaterialTheme.colorScheme.onSurface)
+                    Text("${carteras.count { it.libro == l && !it.archivada }} carteras" + if (arch) " · archivado" else "",
+                        style = MaterialTheme.typography.bodySmall, color = Colores.neutro())
+                }
+                TextButton(onClick = { Libros.mover(e.ctx, carteras, l, -1); e.versionLibros++ }, enabled = i > 0) { Text("↑") }
+                TextButton(onClick = { dialogo = l }) { Text("Renombrar") }
+                TextButton(enabled = arch || todos.count { it !in archivados } > 1, onClick = { Libros.archivar(e.ctx, l, !arch); e.versionLibros++ }) {
+                    Text(if (arch) "Mostrar" else "Archivar")
+                }
+            }
+        }
+        OutlinedButton(onClick = { dialogo = "" }) { Text("Nuevo libro") }
+    }
+    dialogo?.let { viejo ->
+        var nombre by remember(viejo) { mutableStateOf(viejo) }
+        var error by remember(viejo) { mutableStateOf<String?>(null) }
+        var trabajando by remember(viejo) { mutableStateOf(false) }
+        AlertDialog(onDismissRequest = { if (!trabajando) dialogo = null },
+            title = { Text(if (viejo.isEmpty()) "Nuevo libro" else "Renombrar «$viejo»") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    androidx.compose.material3.OutlinedTextField(nombre, { nombre = it; error = null }, label = { Text("Nombre") }, singleLine = true,
+                        isError = error != null, supportingText = { error?.let { Text(it) } })
+                    Text(if (viejo.isEmpty()) "Se crea con Bs efectivo, Bs digital, $ efectivo y $ digital."
+                         else "Se renombra en todos sus datos y su carpeta de CSV en NodeSync.", style = MaterialTheme.typography.bodySmall, color = Colores.neutro())
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !trabajando && nombre.isNotBlank() && nombre.trim() != viejo, onClick = {
+                    trabajando = true
+                    e.io(scope) {
+                        val err = Libros.validar(e.ctx, e.db, nombre, excepto = viejo.ifEmpty { null })
+                        if (err == null) {
+                            if (viejo.isEmpty()) Libros.crear(e.ctx, e.db, nombre) else Libros.renombrar(e.ctx, e.db, viejo, nombre)
+                        }
+                        withContext(Dispatchers.Main) {
+                            trabajando = false
+                            if (err != null) error = err
+                            else {
+                                if (viejo.isEmpty()) e.cambiarLibro(nombre.trim()) else e.libro = Prefs.libroActual(e.ctx)
+                                e.versionLibros++; dialogo = null
+                            }
+                        }
+                    }
+                }) { Text(if (trabajando) "…" else "Guardar") }
+            },
+            dismissButton = { TextButton(onClick = { dialogo = null }, enabled = !trabajando) { Text("Cancelar") } })
+    }
 }

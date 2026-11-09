@@ -6,7 +6,7 @@ App Android de finanzas **100 % local** para la economía venezolana: bolívares
 
 ## Qué hace
 
-- **Libros separados** (Personal / Tienda), cada uno con sus carteras: Bs efectivo, Bs digital, $ efectivo, $ digital, USDT…
+- **Libros separados y editables** (Personal, Tienda y los que crees; renombrar mueve también su carpeta de CSV), cada uno con sus carteras: Bs efectivo, Bs digital, $ efectivo, $ digital, USDT, caja fuerte…
 - **Cuatro tipos de movimiento bien separados**: entrada, gasto, transferencia (retiros, cambios de divisa) y ajuste (descuadres). Los saldos iniciales y los cuadres no inflan los ingresos.
 - **Entrada rápida**: `-8000 pollo`, `+15$ venta`, `8.000 ef comida`, `20$ > bs 1048 cambio`, `500 bs dig > ef`.
 - **Tasas BCV y Binance P2P** consultadas solas (ve.dolarapi.com, bcv.org.ve, API P2P de Binance) pero **nunca obligatorias**: sin internet usa la última conocida marcada como estimada, y corrige los cálculos cuando llega la real. Una tasa manual siempre gana. Histórico BCV para fechas pasadas.
@@ -15,6 +15,13 @@ App Android de finanzas **100 % local** para la economía venezolana: bolívares
 - **Arqueo y conciliación**: cuentas el efectivo o copias el saldo del banco; la diferencia queda registrada.
 - **Categorías que aprenden** de tus correcciones.
 - **Espejo en CSV** (`carteras.csv`, `tasas.csv`, `<Libro>/<aaaa-mm>.csv`), separador `;` y coma decimal para abrirlos en LibreOffice. Si los editas fuera (p. ej. en el PC vía Syncthing), la app importa los cambios; la versión anterior queda en `.anteriores/`.
+- **Deudas** (debo / me deben) con plan de cuotas semanal, cada 14 días o mensual; pagos desde cualquier cartera y moneda. Las compras a crédito cuentan como gasto del mes en que compras; los pagos son transferencias (sin contar dos veces).
+- **Recurrentes** (servicios, alquiler, sueldo) automáticos o propuestos el día que tocan.
+- **Presupuestos** por categoría con aviso al 80 % y al 100 %.
+- **Faltantes**: lista de compras que se convierte en gasto al marcarla.
+- **Cierre del mes**: comparación con el mes anterior y **devaluación** de los bolívares guardados.
+- **Exportar** a Excel (.xlsx con fórmulas, mismo formato BOLÍVARES / DÓLARES) y reporte PDF.
+- **Copia ZIP diaria** (se guardan 30) y **notificaciones** de cuotas por vencer y presupuestos.
 - **Importar hojas de cálculo** con secciones BOLÍVARES / DÓLARES (corrige fechas escritas como texto o con día y mes invertidos).
 
 ## Compilar

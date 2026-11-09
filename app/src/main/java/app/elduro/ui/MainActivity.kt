@@ -50,6 +50,7 @@ import app.elduro.core.Vigilante
 import app.elduro.core.ConsultaTasas
 import app.elduro.core.Duro
 import app.elduro.core.Fechas
+import app.elduro.core.Libros
 import app.elduro.core.Prefs
 import app.elduro.core.TablaTasas
 import app.elduro.core.Vista
@@ -73,6 +74,8 @@ class EstadoApp(val ctx: Context) {
     var estadoTasas by mutableStateOf("")
     var acceso by mutableStateOf(Prefs.tieneAcceso())
     var sync by mutableStateOf(textoSync())
+    /** Se incrementa al crear/renombrar/archivar libros para recalcular la lista. */
+    var versionLibros by mutableStateOf(0)
     val avisos = SnackbarHostState()
 
     fun cambiarLibro(l: String) { libro = l; Prefs.setLibro(ctx, l) }
@@ -205,16 +208,24 @@ private fun Raiz(e: EstadoApp) {
     val presupuestos by e.db.presupuestos().flow().collectAsState(emptyList())
     val faltantes by e.db.faltantes().flow().collectAsState(emptyList())
     val datos = DatosControl(carteras, movs, tabla, deudas, recurrentes, presupuestos, faltantes)
+    val libros = remember(carteras, e.versionLibros) { Libros.activos(e.ctx, carteras) }
+    LaunchedEffect(libros, e.libro) { if (e.libro !in libros) e.cambiarLibro(libros.first()) }
 
     LaunchedEffect(Unit) { e.sync = e.textoSync() }
 
     Scaffold(
         topBar = {
             TopAppBar(title = {
-                SingleChoiceSegmentedButtonRow {
-                    Duro.LIBROS.forEachIndexed { i, l ->
+                if (libros.size <= 3) SingleChoiceSegmentedButtonRow {
+                    libros.forEachIndexed { i, l ->
                         SegmentedButton(selected = e.libro == l, onClick = { e.cambiarLibro(l) },
-                            shape = SegmentedButtonDefaults.itemShape(i, Duro.LIBROS.size)) { Text(l) }
+                            shape = SegmentedButtonDefaults.itemShape(i, libros.size)) { Text(l, maxLines = 1) }
+                    }
+                } else {
+                    var abierto by remember { mutableStateOf(false) }
+                    androidx.compose.material3.OutlinedButton(onClick = { abierto = true }) { Text("${e.libro}  ▾", maxLines = 1) }
+                    androidx.compose.material3.DropdownMenu(abierto, { abierto = false }) {
+                        libros.forEach { l -> androidx.compose.material3.DropdownMenuItem(text = { Text(l) }, onClick = { e.cambiarLibro(l); abierto = false }) }
                     }
                 }
             }, actions = {
@@ -253,7 +264,7 @@ private fun Raiz(e: EstadoApp) {
                 editorAbierto = true
             }
             Pestana.TASAS -> PantallaTasas(e, tabla, tasasLista, movs, mod)
-            Pestana.AJUSTES -> PantallaAjustes(e, mod)
+            Pestana.AJUSTES -> PantallaAjustes(e, carteras, mod)
         }
     }
 

@@ -99,3 +99,71 @@ object Duro {
 
     fun aprendido(db: ElDuroDb): Map<String, String> = db.aprendizaje().all().associate { it.palabra to it.categoria }
 }
+
+/**
+ * Libros (Personal, Tienda y los que cree el usuario). La lista sale de las carteras existentes
+ * más el orden guardado en preferencias; los archivados se ocultan pero conservan todo.
+ */
+object Libros {
+    private const val ORDEN = "libros_orden"
+    private const val ARCHIVADOS = "libros_archivados"
+
+    private fun orden(c: Context) = Prefs.sp(c).getString(ORDEN, null)?.split("\n")?.filter { it.isNotBlank() } ?: Duro.LIBROS
+    private fun setOrden(c: Context, l: List<String>) = Prefs.sp(c).edit().putString(ORDEN, l.distinct().joinToString("\n")).apply()
+
+    fun archivados(c: Context): Set<String> = Prefs.sp(c).getStringSet(ARCHIVADOS, emptySet()).orEmpty()
+
+    fun todos(c: Context, carteras: List<Cartera>): List<String> = (orden(c) + carteras.map { it.libro }).distinct()
+    fun activos(c: Context, carteras: List<Cartera>): List<String> = todos(c, carteras).filter { it !in archivados(c) }.ifEmpty { Duro.LIBROS.take(1) }
+
+    fun validar(c: Context, db: ElDuroDb, nombre: String, excepto: String? = null): String? {
+        val n = nombre.trim()
+        return when {
+            n.isEmpty() -> "Escribe un nombre"
+            n.any { it in "/\\:*?\"<>|" } || n.startsWith(".") -> "No uses / \\ : * ? \" < > | ni un punto al inicio"
+            todos(c, db.carteras().all()).any { it.equals(n, true) && !it.equals(excepto, true) } -> "Ya existe un libro con ese nombre"
+            else -> null
+        }
+    }
+
+    /** Crea el libro con sus cuatro carteras básicas. */
+    fun crear(c: Context, db: ElDuroDb, nombre: String) {
+        val n = nombre.trim()
+        db.runInTransaction {
+            var o = 0
+            for ((nom, m, f) in listOf(Triple("Bs efectivo", Moneda.BS, Forma.EFECTIVO), Triple("Bs digital", Moneda.BS, Forma.DIGITAL),
+                    Triple("$ efectivo", Moneda.USD, Forma.EFECTIVO), Triple("$ digital", Moneda.USD, Forma.DIGITAL)))
+                db.carteras().insert(Cartera(libro = n, nombre = nom, moneda = m, forma = f, orden = o++))
+        }
+        setOrden(c, orden(c) + n)
+    }
+
+    fun renombrar(c: Context, db: ElDuroDb, viejo: String, nuevo: String) {
+        val n = nuevo.trim()
+        CarpetaSync.renombrarLibro(c, viejo, n) {
+            db.runInTransaction {
+                val l = db.libros()
+                l.carteras(viejo, n); l.deudas(viejo, n); l.recurrentes(viejo, n); l.presupuestos(viejo, n); l.faltantes(viejo, n)
+            }
+        }
+        setOrden(c, todos(c, db.carteras().all()).map { if (it == viejo) n else it })
+        val arch = archivados(c)
+        if (viejo in arch) Prefs.sp(c).edit().putStringSet(ARCHIVADOS, arch - viejo + n).apply()
+        if (Prefs.libroActual(c) == viejo) Prefs.setLibro(c, n)
+        val rap = Prefs.carteraRapida(c, viejo)
+        if (rap >= 0) Prefs.setCarteraRapida(c, n, rap)
+    }
+
+    fun archivar(c: Context, nombre: String, archivar: Boolean) {
+        val a = archivados(c)
+        Prefs.sp(c).edit().putStringSet(ARCHIVADOS, if (archivar) a + nombre else a - nombre).apply()
+    }
+
+    fun mover(c: Context, carteras: List<Cartera>, nombre: String, delta: Int) {
+        val l = todos(c, carteras).toMutableList()
+        val i = l.indexOf(nombre); val j = i + delta
+        if (i < 0 || j !in l.indices) return
+        l[i] = l[j]; l[j] = nombre
+        setOrden(c, l)
+    }
+}

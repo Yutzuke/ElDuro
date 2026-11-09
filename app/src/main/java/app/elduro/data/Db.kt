@@ -64,6 +64,16 @@ interface FaltanteDao {
     @Query("DELETE FROM Faltante WHERE id = :id") fun delete(id: Long)
 }
 
+/** Renombrar un libro toca todas las tablas que lo nombran. */
+@Dao
+interface LibroDao {
+    @Query("UPDATE Cartera SET libro = :nuevo WHERE libro = :viejo") fun carteras(viejo: String, nuevo: String)
+    @Query("UPDATE Deuda SET libro = :nuevo WHERE libro = :viejo") fun deudas(viejo: String, nuevo: String)
+    @Query("UPDATE Recurrente SET libro = :nuevo WHERE libro = :viejo") fun recurrentes(viejo: String, nuevo: String)
+    @Query("UPDATE Presupuesto SET libro = :nuevo WHERE libro = :viejo") fun presupuestos(viejo: String, nuevo: String)
+    @Query("UPDATE Faltante SET libro = :nuevo WHERE libro = :viejo") fun faltantes(viejo: String, nuevo: String)
+}
+
 @Dao
 interface CarteraDao {
     @Query("SELECT * FROM Cartera ORDER BY libro, orden, id") fun flow(): Flow<List<Cartera>>
@@ -119,6 +129,7 @@ abstract class ElDuroDb : RoomDatabase() {
     abstract fun recurrentes(): RecurrenteDao
     abstract fun presupuestos(): PresupuestoDao
     abstract fun faltantes(): FaltanteDao
+    abstract fun libros(): LibroDao
 
     companion object {
         @Volatile private var inst: ElDuroDb? = null

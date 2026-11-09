@@ -60,7 +60,7 @@ class Vigilante(ctx: Context, p: WorkerParameters) : Worker(ctx, p) {
         val carteras = db.carteras().all().associateBy { it.id }
         val tasas = TablaTasas(db.tasas().all())
         val mes = YearMonth.now()
-        for (libro in Duro.LIBROS) {
+        for (libro in Libros.activos(app, db.carteras().all())) {
             val movs = Finanzas.delLibro(db.movimientos().all(), carteras, libro)
             for (a in Control.avances(db.presupuestos().all(), movs, db.deudas().all(), carteras, libro, mes, tasas)) {
                 val nivel = when { a.fraccion >= 1 -> 100; a.fraccion >= 0.8 -> 80; else -> continue }
